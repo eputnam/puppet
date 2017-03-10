@@ -56,8 +56,9 @@ class Puppet::Module
   attr_reader :name, :environment, :path, :metadata
   attr_writer :environment
 
-  attr_accessor :dependencies, :forge_name
+  attr_accessor :dependencies, :forge_name, :i18n_init
   attr_accessor :source, :author, :version, :license, :summary, :description, :project_page
+
 
   def initialize(name, path, environment)
     @name = name
@@ -65,10 +66,18 @@ class Puppet::Module
     @environment = environment
 
     assert_validity
-    load_metadata
+
+    load_metadata if has_metadata?
 
     @absolute_path_to_manifests = Puppet::FileSystem::PathPattern.absolute(manifests)
+
+    # i18n initialization for modules
+    require 'gettext-setup'
+    require 'locale'
+
+    initialize_i18n
   end
+
 
   # @deprecated The puppetversion module metadata field is no longer used.
   def puppetversion
@@ -85,12 +94,24 @@ class Puppet::Module
   end
 
   def has_metadata?
+    return false unless metadata_file
+
+    return false unless Puppet::FileSystem.exist?(metadata_file)
+
     begin
-      load_metadata
-      @metadata.is_a?(Hash) && !@metadata.empty?
-    rescue Puppet::Module::MissingMetadata
-      false
+      metadata =  JSON.parse(File.read(metadata_file, :encoding => 'utf-8'))
+    rescue JSON::JSONError => e
+      msg = "#{name} has an invalid and unparsable metadata.json file. The parse error: #{e.message}"
+      case Puppet[:strict]
+      when :off, :warning
+        Puppet.warning(msg)
+      when :error
+        raise FaultyMetadata, msg
+      end
+      return false
     end
+
+    return metadata.is_a?(Hash) && !metadata.keys.empty?
   end
 
   FILETYPES.each do |type, location|
@@ -138,33 +159,14 @@ class Puppet::Module
     @license_file = File.join(path, "License")
   end
 
-  def read_metadata
-    md_file = metadata_file
-    md_file.nil? ? {} : JSON.parse(File.read(md_file, :encoding => 'utf-8'))
-  rescue Errno::ENOENT
-    {}
-  rescue JSON::JSONError => e
-    msg = "#{name} has an invalid and unparsable metadata.json file. The parse error: #{e.message}"
-    case Puppet[:strict]
-    when :off, :warning
-      Puppet.warning(msg)
-    when :error
-      raise FaultyMetadata, msg
-    end
-    {}
-  end
-
   def load_metadata
-    return if instance_variable_defined?(:@metadata)
-
-    @metadata = data = read_metadata
-    return if data.empty?
-
+    @metadata = data = JSON.parse(File.read(metadata_file, :encoding => 'utf-8'))
     @forge_name = data['name'].gsub('-', '/') if data['name']
 
     [:source, :author, :version, :license, :dependencies].each do |attr|
-      value = data[attr.to_s]
-      raise MissingMetadata, "No #{attr} module metadata provided for #{self.name}" if value.nil?
+      unless value = data[attr.to_s]
+        raise MissingMetadata, "No #{attr} module metadata provided for #{self.name}"
+      end
 
       if attr == :dependencies
         unless value.is_a?(Array)
@@ -326,8 +328,9 @@ class Puppet::Module
 
       if version_string
         begin
-          required_version_semver_range = SemanticPuppet::VersionRange.parse(version_string)
-          actual_version_semver = SemanticPuppet::Version.parse(dep_mod.version)
+          # Suppress deprecation warnings from SemVer in 4.9. In 5.0, this will be SemanticPuppet instead
+          required_version_semver_range = SemVer[version_string, true]
+          actual_version_semver = SemVer.new(dep_mod.version, true)
         rescue ArgumentError
           error_details[:reason] = :non_semantic_version
           unmet_dependencies << error_details
@@ -374,6 +377,22 @@ class Puppet::Module
   def assert_validity
     if !Puppet::Module.is_module_directory_name?(@name) && !Puppet::Module.is_module_namespaced_name?(@name)
       raise InvalidName, "Invalid module name #{@name}; module names must be alphanumeric (plus '-'), not '#{@name}'"
+    end
+  end
+
+  def initialize_i18n
+    locales_path = File.absolute_path('locales', path)
+    config_path = File.absolute_path('config.yaml', locales_path)
+
+    module_name = @forge_name.gsub!("/","-") if @forge_name
+
+    if FastGettext.translation_repositories.has_key? module_name
+      FastGettext.text_domain = module_name
+      return
+    end
+
+    if File.exist? locales_path and File.exist? config_path
+      GettextSetup.initialize(locales_path)
     end
   end
 end
