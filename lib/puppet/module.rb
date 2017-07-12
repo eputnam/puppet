@@ -67,6 +67,7 @@ class Puppet::Module
     assert_validity
     load_metadata
 
+    puts @forge_name
     @absolute_path_to_manifests = Puppet::FileSystem::PathPattern.absolute(manifests)
 
     # i18n initialization for modules
@@ -365,23 +366,23 @@ class Puppet::Module
   end
 
   def initialize_i18n
-    locales_path = File.absolute_path('locales', path)
-    config_path = File.absolute_path('config.yaml', locales_path)
     module_name = @forge_name.gsub("/","-") if @forge_name
+    return if module_name.nil? || i18n_initialized?(module_name)
 
-    return nil if i18n_initialized? module_name
+    locales_path = File.absolute_path('locales', path)
 
     begin
       GettextSetup.initialize(locales_path)
       Puppet.debug "#{module_name} initialized for i18n: #{GettextSetup.translation_repositories[module_name]}"
     rescue
+      config_path = File.absolute_path('config.yaml', locales_path)
       Puppet.debug "Could not find locales configuration file for #{module_name} at #{config_path}. Skipping i18n initialization."
     end
   end
 
   private
 
-  def i18n_initialized? module_name
+  def i18n_initialized?(module_name)
     GettextSetup.translation_repositories.has_key? module_name
   end
 

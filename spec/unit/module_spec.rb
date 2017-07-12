@@ -447,7 +447,7 @@ describe Puppet::Module do
     let(:modname) { 'puppetlabs-i18n'}
     let(:modroot) { "#{modpath}/#{modname}/" }
     let(:config_path) { "#{modroot}/locales/config.yaml" }
-    let(:mod_obj) { Puppet::Module.new('puppetlabs-i18n', modroot, env) }
+    let(:mod_obj) { PuppetSpec::Modules.create( modname, modpath, :metadata => { :dependencies => [] }, :env => env ) }
 
     it "is expected to initialize an un-initialized module" do
       expect(GettextSetup.translation_repositories.has_key? modname).to be false
@@ -461,6 +461,9 @@ describe Puppet::Module do
       File.open(config_path, 'w') { |file| file.write(config.to_yaml) }
 
       mod_obj.initialize_i18n
+
+      require 'pry'
+      binding.pry
 
       expect(GettextSetup.translation_repositories.has_key? modname).to be true
     end
