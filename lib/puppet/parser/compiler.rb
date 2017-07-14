@@ -645,6 +645,7 @@ class Puppet::Parser::Compiler
     names = Puppet::Type.metaparams.select do |name|
       !Puppet::Parser::Resource.relationship_parameter?(name)
     end
+
     data = {}
     catalog.walk(main, :out) do |source, target|
       if source_data = data[source] || metaparams_as_data(source, names)
